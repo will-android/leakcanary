@@ -26,45 +26,50 @@ A few more things:
 * Shark is heavily tested (80% test coverage).
 * Shark can run in both Java and Android VMs, with no other dependency than Okio and Kotlin.
 * Shark can analyze both Java and Android VM hprof files.
+* Shark can deobfuscate hprof records if it has access to obfuscation mapping file.
 
 ## Shark CLI
 
 The Shark Command Line Interface (CLI) enables you to analyze heaps directly from your computer. It can dump the heap of an app installed on a connected Android device, analyze it, and even strip a heap dump of any sensitive data (e.g. PII, passwords or encryption keys) which is useful when sharing a heap dump.
 
-Download it [here](https://github.com/square/leakcanary/releases/download/v2.0-beta-3/shark-cli-2.0-beta-3.zip)!
+Download it [here](https://github.com/square/leakcanary/releases/download/v{{ leak_canary.release }}/shark-cli-{{ leak_canary.release }}.zip)!
 
 Usage instructions:
 
 ```
 $ ./bin/shark-cli
 
-Shark CLI
+Usage: shark-cli [OPTIONS] COMMAND [ARGS]...
 
-                 ^`.                 .=""=.
- ^_              \  \               / _  _ \
- \ \             {   \             |  d  b  |
- {  \           /     `~~~--__     \   /\   /
- {   \___----~~'              `~~-_/'-=\/=-'\,
-  \                         /// a  `~.      \ \
-  / /~~~~-, ,__.    ,      ///  __,,,,)      \ |
-  \/      \/    `~~~;   ,---~~-_`/ \        / \/
-                   /   /            '.    .'
-                  '._.'             _|`~~`|_
-                                    /|\  /|\
+                   ^`.                 .=""=.
+   ^_              \  \               / _  _ \
+   \ \             {   \             |  d  b  |
+   {  \           /     `~~~--__     \   /\   /
+   {   \___----~~'              `~~-_/'-=\/=-'\,
+    \                         /// a  `~.      \ \
+    / /~~~~-, ,__.    ,      ///  __,,,,)      \ |
+    \/      \/    `~~~;   ,---~~-_`/ \        / \/
+                     /   /            '.    .'
+                    '._.'             _|`~~`|_
+                                      /|\  /|\
 
-Commands: [analyze-process, dump-process, analyze-hprof, strip-hprof]
+Options:
+  -h, --help  Show this message and exit
 
-analyze-process: Dumps the heap for the provided process name, pulls the hprof file and analyzes it.
-  USAGE: analyze-process PROCESS_PACKAGE_NAME
-
-dump-process: Dumps the heap for the provided process name and pulls the hprof file.
-  USAGE: dump-process PROCESS_PACKAGE_NAME
-
-analyze-hprof: Analyzes the provided hprof file.
-  USAGE: analyze-hprof HPROF_FILE_PATH
-
-strip-hprof: Replaces all primitive arrays from the provided hprof file with arrays of zeroes.
-  USAGE: strip-hprof HPROF_FILE_PATH
+Commands:
+  analyze-process  Dumps the heap for the provided partial PROCESS_NAME, pulls
+                   the hprof file and analyzes it. (Usage: shark-cli
+                   analyze-process [--device ID --obfuscation-mapping PATH]
+                   PROCESS_NAME)
+  dump-process     Dumps the heap for the provided partial PROCESS_NAME and
+                   pulls the hprof file. (Usage: shark-cli dump-process
+                   [--device ID] PROCESS_NAME)
+  analyze-hprof    Analyzes the provided HPROF_FILE_PATH. (Usage: shark-cli
+                   analyze-hprof [--obfuscation-mapping PATH] HPROF_FILE_PATH)
+  strip-hprof      Replaces all primitive arrays from the provided
+                   HPROF_FILE_PATH with arrays of zeroes and generates a new
+                   "-stripped.hprof" file. (Usage: shark-cli strip-hprof
+                   HPROF_FILE_PATH)
 ```
 
 ## Shark code examples

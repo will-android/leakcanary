@@ -1,10 +1,270 @@
 # Change Log
 
+## Version 2.2 (2020-02-05)
+
+We've got some good stuff for the first release of the decade!
+
+Many thanks to
+[@AndroidInternal](https://github.com/AndroidInternal),
+[@Armaxis](https://github.com/Armaxis),
+[@lic2050](https://github.com/lic2050),
+[@mzgreen](https://github.com/mzgreen),
+[@orenktaboola](https://github.com/orenktaboola),
+[@personshelldon](https://github.com/personshelldon),
+[@Plastix](https://github.com/Plastix),
+[@pyricau](https://github.com/pyricau)
+for the contributions, bug reports and feature requests.
+
+### ViewModel leak detection
+
+[Android ViewModels](https://developer.android.com/topic/libraries/architecture/viewmodel) are really cool! Their lifecycle is much nicer than fragments or activities, but sometimes mistakes happen. LeakCanary will now automatically detect ViewModel leaks and report any ViewModel instance retained after its `onCleared()` method was called.
+
+### Android TV
+
+![tv ui](images/android-tv-leaks.png)
+
+LeakCanary is finally coming to big screens near you! Best part - no additional setup is required, just enable it like you would for a [mobile device](getting_started.md). Now whenever there's a leak - you will see a helpful Toast appear with all the details. Make sure to check out our new [Android TV](recipes.md#android-tv) section and chill! 
+
+### Java-friendly Config builders
+
+[It was brought to our attention](https://github.com/square/leakcanary/issues/1714) that configuring `LeakCanary` and `AppWatcher` was a miserable experience from Java code. Well, not anymore!
+
+Now you can use `LeakCanary.Config.Builder` and `AppWatcher.Config.Builder` to have idiomatic Java when updating the configurations. For example:
+
+```
+LeakCanary.Config config = LeakCanary.getConfig().newBuilder()
+  .retainedVisibleThreshold(3)
+  .computeRetainedHeapSize(false)
+  .build();
+LeakCanary.setConfig(config);
+```
+
+If you notice any other problems when using LeakCanary from Java, please [file an issue](https://github.com/square/leakcanary/issues/new?assignees=&labels=type%3A+enhancement&template=3-feature.md&title=)! We take Java-interop seriously and will be happy to improve LeakCanary's API! 
+
+For more details, see the [2.2 Milestone](https://github.com/square/leakcanary/milestone/16) and the [full diff](https://github.com/square/leakcanary/compare/v2.1...v2.2).
+
+## Version 2.1 (2019-12-31)
+
+A special New Year's Eve release 🥳, the next release will be in another decade 😎!
+
+Many thanks to
+[@adamfit](https://github.com/adamfit),
+[@alexander-smityuk](https://github.com/alexander-smityuk),
+[@Armaxis](https://github.com/Armaxis),
+[@BraisGabin](https://github.com/BraisGabin),
+[@devism](https://github.com/devism),
+[@ditclear](https://github.com/ditclear),
+[@jrodbx](https://github.com/jrodbx),
+[@jstefanowski](https://github.com/jstefanowski),
+[@Maragues](https://github.com/Maragues),
+[@mzgreen](https://github.com/mzgreen),
+[@pyricau](https://github.com/pyricau)
+for the contributions, bug reports and feature requests.
+
+### A Gradle plugin for obfuscated apps
+
+It's fairly common for teams to have a QA build that is tested before making the release build. Usually that build will be obfuscated (via Proguard or R8), but also add LeakCanary to detect leaks during QA. This leads to obfuscated leak traces, which are hard to understand 🤯. Check out our new [Gradle deobfuscation plugin](recipes.md#using-leakcanary-with-obfuscated-apps) and rejoice!
+
+### UI <strike>twix</strike> tweaks
+
+In 2.0 we changed the LeakCanary UI and UX, and built a foundation on which 2.1 extends.
+
+![ui](images/screenshot-2.0.png)
+
+* Since 2.0, Leaks are grouped by their distinct signature. In 2.1 there's a `New` tag that will show until you open up a leak. There's also a `Library Leak` tag for leaks that are known to be caused by a bug in the Android Framework or Google libraries, and the library leak description now shows up in the UI.
+* The type of the Java objects (class, instance, array) is now displayed in the LeakTrace, e.g. see `FontsContract class` and `ExampleApplication instance` above.
+* The type of the GC root now shows up at the root of the leak trace. Makes sense!
+* The leak result notification has an importance now set to MAX so that it'll show up right in your face. If you turn it off, the canary will haunt you in your dreams 🐤👻. To save your sanity and your device battery, automatic heap dumps now won't happen more often than once per minute.
+* The resource id name for `View` instances is now displayed in the leak trace. You shouldn't look at the [implementation](https://github.com/square/leakcanary/pull/1663).
+
+```
+├─ android.widget.TextView instance
+│    View.mID = R.id.helper_text
+```
+
+### Documentation goodies
+
+* The [Fundamentals](fundamentals.md) page was entirely rewritten, split into 3 pages and moved to its own tab. Please read it and provide feedback!
+* At Square, we have been uploading leaks to Bugsnag for 3 years now, so that no leak ever gets missed. Follow [this recipe](recipes.md#uploading-to-bugsnag)!
+* Did you know you can [run LeakCanary in a JVM](recipes.md#detecting-leaks-in-jvm-applications)?
+
+### API <strike>breaking</strike> bettering changes
+
+* The APIs of the `Leak` and `LeakTrace` classes have significantly changed, e.g. all `LeakTrace` instances with an identical signature are grouped under the same Leak object. Despite these breaking changes, this release version is a minor update. Oh noes, what about semantic versioning 😱? Ask Don Quixote.
+* You can now customize the way LeakCanary finds the leaking objects in the heap dump. For example, here's the configuration SharkCli uses to find leaks in heap dumps of apps that don't even have the LeakCanary dependency:
+
+```kotlin
+LeakCanary.config = LeakCanary.config.copy(
+    leakingObjectFinder = FilteringLeakingObjectFinder(
+        AndroidObjectInspectors.appLeakingObjectFilters
+    )
+)
+```
+
+* LeakCanary automatically disables itself in tests by detecting that the `org.junit.Test` is in the classpath. Unfortunately, some apps ship Junit in their app debug classpath (e.g. when using OkHttp MockWebServer). You can now customize which class is used to detect tests:
+
+```xml
+<resources>
+  <string name="leak_canary_test_class_name">assertk.Assert</string>
+</resources>
+```
+
+### Interactive CLI
+
+[Shark CLI](https://github.com/square/leakcanary/releases/download/v2.1/shark-cli-2.1.zip) was rewritten on top of [Clikt](https://github.com/ajalt/clikt):
+
+```bash
+$ shark-cli
+Usage: shark-cli [OPTIONS] COMMAND [ARGS]...
+
+                 ^`.                 .=""=.
+ ^_              \  \               / _  _ \
+ \ \             {   \             |  d  b  |
+ {  \           /     `~~~--__     \   /\   /
+ {   \___----~~'              `~~-_/'-=\/=-'\,
+  \                         /// a  `~.      \ \
+  / /~~~~-, ,__.    ,      ///  __,,,,)      \ |
+  \/      \/    `~~~;   ,---~~-_`/ \        / \/
+                   /   /            '.    .'
+                  '._.'             _|`~~`|_
+                                    /|\  /|\
+
+Options:
+  -p, --process NAME              Full or partial name of a process, e.g.
+                                  "example" would match "com.example.app"
+  -d, --device ID                 device/emulator id
+  -m, --obfuscation-mapping PATH  path to obfuscation mapping file
+  --verbose / --no-verbose        provide additional details as to what
+                                  shark-cli is doing
+  -h, --hprof FILE                path to a .hprof file
+  --help                          Show this message and exit
+
+Commands:
+  interactive   Explore a heap dump.
+  analyze       Analyze a heap dump.
+  dump-process  Dump the heap and pull the hprof file.
+  strip-hprof   Replace all primitive arrays from the provided heap dump with
+                arrays of zeroes and generate a new "-stripped.hprof" file.
+```
+
+There's a new `interactive` command which enables exploring the heap dump from the command line:
+
+```bash
+$ shark-cli -h heapdump.hprof interactive
+Enter command [help]:
+help
+
+Available commands:
+  analyze                   Analyze the heap dump.
+  class NAME@ID             Show class with a matching NAME and Object ID.
+  instance CLASS_NAME@ID    Show instance with a matching CLASS_NAME and Object
+ID.
+  array CLASS_NAME@ID       Show array instance with a matching CLASS_NAME and
+Object ID.
+  ->instance CLASS_NAME@ID  Show path from GC Roots to instance.
+  ~>instance CLASS_NAME@ID  Show path from GC Roots to instance, highlighting
+suspect references.
+  help                      Show this message.
+  exit                      Exit this interactive prompt.
+```
+
+We're currently exploring the idea of adding [support for SQL queries](https://twitter.com/Piwai/status/1211795647273160704), feedback welcome!
+
+For more details, see the [2.1 Milestone](https://github.com/square/leakcanary/milestone/15) and the [full diff](https://github.com/square/leakcanary/compare/v2.0...v2.1).
+
+## Version 2.0 (2019-11-27)
+
+In the past 7 months, LeakCanary went through 3 alphas and 5 betas, encompassing 23 contributors over 493 commits, 35826 insertions and 10156 deletions.
+
+### Should I upgrade?
+
+**YES!** LeakCanary 2 is so much better, it might make you excited when you see a new memory leak. Follow the [upgrade guide](upgrading-to-leakcanary-2.0.md), you won't regret it!
+
+### So, what's changed since 1.6.3?
+
+**Everything.** The LeakCanary codebase went from **~6000** lines of Java to **~16000** lines of Kotlin, excluding comments & blanks.
+
+!!! question "Isn't Kotlin supposed to drastically reduce the amount of boilerplate code?"
+    Absolutely! And it did. But then, we wrote more code.
+    LeakCanary used to depend on [HAHA](https://github.com/square/haha), a repackaging of [perflib](https://android.googlesource.com/platform/tools/base/+/2f03004c181baf9d291a9bf992e1b444e83cd82d/perflib/), the heap dump parser used by Android Studio. Unfortunately perflib was slow and used too much memory, so LeakCanary now includes its own heap dump parser: [Shark](shark.md). The extra code comes from Shark, but also from having a lot more automated tests, and an improved UI layer.
+
+One major difference: when the app is in foreground, LeakCanary 2 will not trigger on every retained instance. Instead it will wait until the app goes in background or to reach a threashold of 5 retained instances in foreground. The analysis will then find all the leaks at once, and group identical leaks in the results UI. Please read the [Fundamentals](fundamentals.md) section to learn more!
+
+### Random facts
+
+* You can customize the Leaks launcher icon and label: [learn more here](recipes.md#icon-and-label).
+* If you ` press on your main activity launcher icon, you should see a LeakCanary dynamic shortcut. You can then long press that to drop it on your home screen, and the launcher shows that it's the leaks launcher for your app.
+* Out of the box, LeakCanary tracks all fragments flavors: AOSP, Support Library and Android X.
+* From within the leak screen, you can share a leak to stack overflow. You can also share a heap dump, or import and analyze a heap dump from another device.
+* You can run LeakCanary from your computer command line, on any debuggable app even if that app doesn't have LeakCanary: [learn more here](shark.md##shark-cli).
+* The new documentation is fully searchable and includes the API documentation. Try the search bar ⤴.
+* A large 160Mb heap dump uses 2Gb memory when opening it in Android Studio, but only 40Mb with Shark.
+
+### Changes since 2.0 Beta 5
+
+* Shark CLI supports multiple connected devices [#1642](https://github.com/square/leakcanary/issues/1642)
+* Fixed missing sources from Maven Central [#1643](https://github.com/square/leakcanary/issues/1643)
+* Updated notification icon to avoid confusion with Twitter DM notifications, and added icons to bottom navigation bar [#1648](https://github.com/square/leakcanary/pull/1648)
+* Automatic leak detection for support library fragments [#1611](https://github.com/square/leakcanary/pull/1611)
+
+Many thanks to
+[@AndreasBoehm](https://github.com/AndreasBoehm),
+[@jrodbx](https://github.com/jrodbx),
+[@pyricau](https://github.com/pyricau)
+for the contributions, bug reports and feature requests.
+
+For more details, see the [2.0 Milestone](https://github.com/square/leakcanary/milestone/14) and the [full diff](https://github.com/square/leakcanary/compare/v2.0-beta-5...v2.0).
+
+## Version 2.0 Beta 5 (2019-11-25)
+
+* Major bugfix: native gc roots were accidentally ignored in Beta 4, as a result some leaks were not found [#1634](https://github.com/square/leakcanary/issues/1634)
+* Fixed Lint warning (`leak_canary_about_message` string triggered *multiple substitutions* warning) [#1630](https://github.com/square/leakcanary/issues/1630)
+
+Many thanks to
+[@DanEdgarTarget](https://github.com/DanEdgarTarget),
+[@msfjarvis](https://github.com/msfjarvis),
+[@PaulWoitaschek](https://github.com/pyricau),
+[@pyricau](https://github.com/pyricau),
+[@ZacSweers](https://github.com/ZacSweers)
+for the contributions, bug reports and feature requests.
+
+For more details, see the [2.0-beta-5 Milestone](https://github.com/square/leakcanary/milestone/13) and the [full diff](https://github.com/square/leakcanary/compare/v2.0-beta-4...v2.0-beta-5).
+
+## Version 2.0 Beta 4 (2019-11-18)
+
+* Improved string rendering for heap analysis results
+* UX redesign [#1445](https://github.com/square/leakcanary/issues/1445)
+* Support for pattern matching of native reference leaks [#1562](https://github.com/square/leakcanary/issues/1562)
+* Added support for deobfuscation using Proguard mapping files in Shark [#1499](https://github.com/square/leakcanary/issues/1499). This isn't directly supported in LeakCanary yet.
+* Added support for extracting metadata from the heap dump (see the [recipe](recipes.md#extracting-metadata-from-the-heap-dump)) [#1519](https://github.com/square/leakcanary/issues/1519)
+* Improved auto disabling of LeakCanary in Unit and UI tests [#1552](https://github.com/square/leakcanary/issues/1552)
+* Several performance improvements when parsing heap dumps
+* Fixed several bugs and crashes
+* Added new known leak patterns
+
+Many thanks to
+[@Armaxis](https://github.com/Armaxis),
+[@BraisGabin](https://github.com/BraisGabin),
+[@bric3](https://github.com/bric3),
+[@elihart](https://github.com/elihart),
+[@fernandospr](https://github.com/fernandospr),
+[@flickator](https://github.com/flickator),
+[@gabrysgab](https://github.com/gabrysgab),
+[@JorgeDLS](https://github.com/JorgeDLS),
+[@lannyf77](https://github.com/lannyf77),
+[@msfjarvis](https://github.com/msfjarvis),
+[@mzgreen](https://github.com/mzgreen),
+[@ozmium](https://github.com/ozmium),
+[@PaulWoitaschek](https://github.com/pyricau),
+[@pyricau](https://github.com/pyricau),
+[@shelpy](https://github.com/shelpy),
+[@vRallev](https://github.com/vRallev),
+[@ZacSweers](https://github.com/ZacSweers)
+for the contributions, bug reports and feature requests.
+
+For more details, see the [2.0-beta-4 Milestone](https://github.com/square/leakcanary/milestone/12) and the [full diff](https://github.com/square/leakcanary/compare/v2.0-beta-3...v2.0-beta-4).
+
 ## Version 2.0 Beta 3 (2019-08-22)
-
-LeakCanary 2 is in **beta**: the internals and APIs are mostly stable.
-
-Now is a great time to adopt it and provide feedback before the stable release. We're counting on you to find bugs and suggest improvements! Check out the new [Getting Started](https://square.github.io/leakcanary/getting_started) instructions and the [migration guide](https://square.github.io/leakcanary/upgrading-to-leakcanary-2.0/). 
 
 * Baseline memory usage for large hprofs divided by 3 and removed memory spikes [#1543](https://github.com/square/leakcanary/pull/1543)
 * Fixed crash when LeakCanary is initialized from another process [#1529](https://github.com/square/leakcanary/issues/1529)
@@ -177,7 +437,7 @@ For more details, see the [1.6.3 Milestone](https://github.com/square/leakcanary
 
 Many thanks to
 [@fractalwrench](https://github.com/fractalwrench),
-[@hzsweers](https://github.com/hzsweers),
+[@ZacSweers](https://github.com/ZacSweers),
 [@Goddchen](https://github.com/Goddchen),
 [@igokoro](https://github.com/igokoro),
 [@IlyaGulya](https://github.com/IlyaGulya),

@@ -1,31 +1,39 @@
 package leakcanary.internal
 
+import android.app.Activity
 import android.app.Application
-import android.app.Instrumentation
+import android.app.Application.ActivityLifecycleCallbacks
+import android.app.UiModeManager
 import android.content.ComponentName
+import android.content.Context.UI_MODE_SERVICE
 import android.content.Intent
 import android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_DISABLED
 import android.content.pm.PackageManager.COMPONENT_ENABLED_STATE_ENABLED
 import android.content.pm.PackageManager.DONT_KILL_APP
 import android.content.pm.ShortcutInfo.Builder
 import android.content.pm.ShortcutManager
+import android.content.res.Configuration
 import android.graphics.drawable.Icon
 import android.os.Build.VERSION
 import android.os.Build.VERSION_CODES
 import android.os.Handler
 import android.os.HandlerThread
+import com.squareup.leakcanary.core.BuildConfig
 import com.squareup.leakcanary.core.R
+import leakcanary.AppWatcher
 import leakcanary.GcTrigger
 import leakcanary.LeakCanary
 import leakcanary.LeakCanary.Config
-import leakcanary.AppWatcher
 import leakcanary.OnHeapAnalyzedListener
 import leakcanary.OnObjectRetainedListener
+import leakcanary.internal.InternalLeakCanary.FormFactor.MOBILE
+import leakcanary.internal.InternalLeakCanary.FormFactor.TV
+import leakcanary.internal.InternalLeakCanary.FormFactor.WATCH
 import leakcanary.internal.activity.LeakActivity
+import leakcanary.internal.tv.TvOnRetainInstanceListener
 import shark.SharkLog
 import java.lang.reflect.InvocationHandler
 import java.lang.reflect.Proxy
-import java.util.concurrent.atomic.AtomicReference
 
 internal object InternalLeakCanary : (Application) -> Unit, OnObjectRetainedListener {
 
@@ -34,9 +42,29 @@ internal object InternalLeakCanary : (Application) -> Unit, OnObjectRetainedList
   private lateinit var heapDumpTrigger: HeapDumpTrigger
 
   lateinit var application: Application
+
+  // BuildConfig.LIBRARY_VERSION is stripped so this static var is how we keep it around to find
+  // it later when parsing the heap dump.
+  @Suppress("unused")
+  @JvmStatic
+  private var version = BuildConfig.LIBRARY_VERSION
+
   @Volatile
   var applicationVisible = false
     private set
+
+  private val testClassName by lazy {
+    application.getString(R.string.leak_canary_test_class_name)
+  }
+
+  private val isRunningTests by lazy {
+    try {
+      Class.forName(testClassName)
+      true
+    } catch (e: Exception) {
+      false
+    }
+  }
 
   val leakDirectoryProvider: LeakDirectoryProvider by lazy {
     LeakDirectoryProvider(application, {
@@ -56,6 +84,35 @@ internal object InternalLeakCanary : (Application) -> Unit, OnObjectRetainedList
         objectInspectors = emptyList(),
         onHeapAnalyzedListener = OnHeapAnalyzedListener {}
     )
+
+  internal enum class FormFactor {
+    MOBILE,
+    TV,
+    WATCH,
+  }
+
+  val formFactor by lazy {
+    val currentModeType =
+      (application.getSystemService(UI_MODE_SERVICE) as UiModeManager).currentModeType
+    return@lazy when (currentModeType) {
+      Configuration.UI_MODE_TYPE_TELEVISION -> TV
+      Configuration.UI_MODE_TYPE_WATCH -> WATCH
+      else -> MOBILE
+    }
+  }
+
+  val isInstantApp by lazy {
+    VERSION.SDK_INT >= VERSION_CODES.O && application.packageManager.isInstantApp
+  }
+
+  val onRetainInstanceListener by lazy {
+    when (formFactor) {
+      TV -> TvOnRetainInstanceListener(application)
+      else -> DefaultOnRetainInstanceListener()
+    }
+  }
+
+  var resumedActivity: Activity? = null
 
   override fun invoke(application: Application) {
     this.application = application
@@ -80,34 +137,32 @@ internal object InternalLeakCanary : (Application) -> Unit, OnObjectRetainedList
       this.applicationVisible = applicationVisible
       heapDumpTrigger.onApplicationVisibilityChanged(applicationVisible)
     }
+    registerResumedActivityListener(application)
     addDynamicShortcut(application)
 
-    disableDumpHeapInInstrumentationTests()
+    disableDumpHeapInTests()
   }
 
-  private fun disableDumpHeapInInstrumentationTests() {
-    // This is called before Application.onCreate(), so InstrumentationRegistry has no reference to
-    // the instrumentation yet. That happens immediately after the content providers are created,
-    // in the same main thread message, so by posting to the end of the main thread queue we're
-    // guaranteed that the instrumentation will be in place.
-    Handler().post {
-      val runningInInstrumentationTests = try {
-        // This is assuming all UI tests rely on InstrumentationRegistry. Should be mostly true
-        // these days (especially since we force the Android X dependency on consumers).
-        val registryClass = Class.forName("androidx.test.platform.app.InstrumentationRegistry")
-        val instrumentationRefField = registryClass.getDeclaredField("instrumentationRef")
-        instrumentationRefField.isAccessible = true
-        @Suppress("UNCHECKED_CAST")
-        val instrumentationRef = instrumentationRefField.get(
-            null
-        ) as AtomicReference<Instrumentation>
-        instrumentationRef.get() != null
-      } catch (ignored: Throwable) {
-        false
+  private fun registerResumedActivityListener(application: Application) {
+    application.registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks by noOpDelegate() {
+      override fun onActivityResumed(activity: Activity) {
+        resumedActivity = activity
       }
 
-      if (runningInInstrumentationTests) {
-        SharkLog.d { "Instrumentation test detected, setting LeakCanary.Config.dumpHeap to false" }
+      override fun onActivityPaused(activity: Activity) {
+        if (resumedActivity === activity) {
+          resumedActivity = null
+        }
+      }
+    })
+  }
+
+  private fun disableDumpHeapInTests() {
+    // This is called before Application.onCreate(), so if the class is loaded through a secondary
+    // dex it might not be available yet.
+    Handler().post {
+      if (isRunningTests) {
+        SharkLog.d { "$testClassName detected in classpath, app is running tests => disabling heap dumping & analysis" }
         LeakCanary.config = LeakCanary.config.copy(dumpHeap = false)
       }
     }
@@ -119,6 +174,10 @@ internal object InternalLeakCanary : (Application) -> Unit, OnObjectRetainedList
       return
     }
     if (!application.resources.getBoolean(R.bool.leak_canary_add_dynamic_shortcut)) {
+      return
+    }
+    if (isInstantApp) {
+      // Instant Apps don't have access to ShortcutManager
       return
     }
 
@@ -218,9 +277,9 @@ internal object InternalLeakCanary : (Application) -> Unit, OnObjectRetainedList
     }
   }
 
-  fun onDumpHeapReceived() {
+  fun onDumpHeapReceived(forceDump: Boolean) {
     if (this::heapDumpTrigger.isInitialized) {
-      heapDumpTrigger.onDumpHeapReceived()
+      heapDumpTrigger.onDumpHeapReceived(forceDump)
     }
   }
 

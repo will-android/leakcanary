@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2018 Square, Inc.
+ * Copyright (C) 2019 Square, Inc.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,6 +33,10 @@ internal object FragmentDestroyWatcher {
   private const val ANDROIDX_FRAGMENT_DESTROY_WATCHER_CLASS_NAME =
     "leakcanary.internal.AndroidXFragmentDestroyWatcher"
 
+  private const val ANDROID_SUPPORT_FRAGMENT_CLASS_NAME = "android.support.v4.app.Fragment"
+  private const val ANDROID_SUPPORT_FRAGMENT_DESTROY_WATCHER_CLASS_NAME =
+    "leakcanary.internal.AndroidSupportFragmentDestroyWatcher"
+
   fun install(
     application: Application,
     objectWatcher: ObjectWatcher,
@@ -46,15 +50,22 @@ internal object FragmentDestroyWatcher {
       )
     }
 
-    if (classAvailable(ANDROIDX_FRAGMENT_CLASS_NAME) &&
-        classAvailable(ANDROIDX_FRAGMENT_DESTROY_WATCHER_CLASS_NAME)
-    ) {
-      val watcherConstructor = Class.forName(ANDROIDX_FRAGMENT_DESTROY_WATCHER_CLASS_NAME)
-          .getDeclaredConstructor(ObjectWatcher::class.java, Function0::class.java)
-      @kotlin.Suppress("UNCHECKED_CAST")
-      fragmentDestroyWatchers.add(
-          watcherConstructor.newInstance(objectWatcher, configProvider) as (Activity) -> Unit
-      )
+    getWatcherIfAvailable(
+        ANDROIDX_FRAGMENT_CLASS_NAME,
+        ANDROIDX_FRAGMENT_DESTROY_WATCHER_CLASS_NAME,
+        objectWatcher,
+        configProvider
+    )?.let {
+      fragmentDestroyWatchers.add(it)
+    }
+
+    getWatcherIfAvailable(
+        ANDROID_SUPPORT_FRAGMENT_CLASS_NAME,
+        ANDROID_SUPPORT_FRAGMENT_DESTROY_WATCHER_CLASS_NAME,
+        objectWatcher,
+        configProvider
+    )?.let {
+      fragmentDestroyWatchers.add(it)
     }
 
     if (fragmentDestroyWatchers.size == 0) {
@@ -73,11 +84,39 @@ internal object FragmentDestroyWatcher {
     })
   }
 
+  private fun getWatcherIfAvailable(
+    fragmentClassName: String,
+    watcherClassName: String,
+    objectWatcher: ObjectWatcher,
+    configProvider: () -> AppWatcher.Config
+  ): ((Activity) -> Unit)? {
+
+    return if (classAvailable(fragmentClassName) &&
+        classAvailable(watcherClassName)
+    ) {
+      val watcherConstructor = Class.forName(watcherClassName)
+          .getDeclaredConstructor(ObjectWatcher::class.java, Function0::class.java)
+      @Suppress("UNCHECKED_CAST")
+      watcherConstructor.newInstance(objectWatcher, configProvider) as (Activity) -> Unit
+
+    } else {
+      null
+    }
+  }
+
   private fun classAvailable(className: String): Boolean {
     return try {
       Class.forName(className)
       true
-    } catch (e: ClassNotFoundException) {
+    } catch (e: Throwable) {
+      // e is typically expected to be a ClassNotFoundException
+      // Unfortunately, prior to version 25.0.2 of the support library the
+      // FragmentManager.FragmentLifecycleCallbacks class was a non static inner class.
+      // Our AndroidSupportFragmentDestroyWatcher class is compiled against the static version of
+      // the FragmentManager.FragmentLifecycleCallbacks class, leading to the
+      // AndroidSupportFragmentDestroyWatcher class being rejected and a NoClassDefFoundError being
+      // thrown here. So we're just covering our butts here and catching everything, and assuming
+      // any throwable means "can't use this". See https://github.com/square/leakcanary/issues/1662
       false
     }
   }

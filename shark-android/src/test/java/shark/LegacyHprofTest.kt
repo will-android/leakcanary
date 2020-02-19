@@ -2,9 +2,12 @@ package shark
 
 import org.assertj.core.api.Assertions.assertThat
 import org.junit.Test
+import shark.GcRoot.StickyClass
+import shark.LeakTrace.GcRootType
 import shark.LegacyHprofTest.WRAPS_ACTIVITY.DESTROYED
 import shark.LegacyHprofTest.WRAPS_ACTIVITY.NOT_ACTIVITY
 import shark.LegacyHprofTest.WRAPS_ACTIVITY.NOT_DESTROYED
+import shark.SharkLog.Logger
 import java.io.File
 
 class LegacyHprofTest {
@@ -12,19 +15,27 @@ class LegacyHprofTest {
   @Test fun preM() {
     val analysis = analyzeHprof("leak_asynctask_pre_m.hprof")
     assertThat(analysis.applicationLeaks).hasSize(2)
-    val leak1 = analysis.applicationLeaks[0]
-    val leak2 = analysis.applicationLeaks[1]
-    assertThat(leak1.className).isEqualTo("android.graphics.Bitmap")
-    assertThat(leak2.className).isEqualTo("com.example.leakcanary.MainActivity")
+    val leak1 = analysis.applicationLeaks[0].leakTraces.first()
+    val leak2 = analysis.applicationLeaks[1].leakTraces.first()
+    assertThat(leak1.leakingObject.className).isEqualTo("android.graphics.Bitmap")
+    assertThat(leak2.leakingObject.className).isEqualTo("com.example.leakcanary.MainActivity")
+    assertThat(analysis.metadata).isEqualTo(
+        mapOf(
+            "App process name" to "com.example.leakcanary",
+            "Build.MANUFACTURER" to "Genymotion",
+            "Build.VERSION.SDK_INT" to "19",
+            "LeakCanary version" to "Unknown"
+        )
+    )
   }
 
   @Test fun androidM() {
     val analysis = analyzeHprof("leak_asynctask_m.hprof")
 
     assertThat(analysis.applicationLeaks).hasSize(1)
-    val leak = analysis.applicationLeaks[0]
-    assertThat(leak.className).isEqualTo("com.example.leakcanary.MainActivity")
-    assertThat(leak.leakTrace.elements[0].labels).contains("GC Root: System class")
+    val leak = analysis.applicationLeaks[0].leakTraces.first()
+    assertThat(leak.leakingObject.className).isEqualTo("com.example.leakcanary.MainActivity")
+    assertThat(leak.gcRootType).isEqualTo(GcRootType.STICKY_CLASS)
   }
 
   @Test fun gcRootReferencesUnknownObject() {
@@ -60,8 +71,8 @@ class LegacyHprofTest {
     val analysis = analyzeHprof("leak_asynctask_o.hprof")
 
     assertThat(analysis.applicationLeaks).hasSize(1)
-    val leak = analysis.applicationLeaks[0]
-    assertThat(leak.className).isEqualTo("com.example.leakcanary.MainActivity")
+    val leak = analysis.applicationLeaks[0].leakTraces.first()
+    assertThat(leak.leakingObject.className).isEqualTo("com.example.leakcanary.MainActivity")
   }
 
   private enum class WRAPS_ACTIVITY {
@@ -101,8 +112,8 @@ class LegacyHprofTest {
     val analysis = analyzeHprof("gc_root_in_non_primary_heap.hprof")
 
     assertThat(analysis.applicationLeaks).hasSize(1)
-    val leak = analysis.applicationLeaks[0]
-    assertThat(leak.className).isEqualTo("com.example.leakcanary.MainActivity")
+    val leak = analysis.applicationLeaks[0].leakTraces.first()
+    assertThat(leak.leakingObject.className).isEqualTo("com.example.leakcanary.MainActivity")
   }
 
   private fun analyzeHprof(fileName: String): HeapAnalysisSuccess {
@@ -117,9 +128,30 @@ class LegacyHprofTest {
   }
 
   private fun analyzeHprof(hprofFile: File): HeapAnalysisSuccess {
+    SharkLog.logger = object : Logger {
+      override fun d(message: String) {
+        println(message)
+      }
+
+      override fun d(
+        throwable: Throwable,
+        message: String
+      ) {
+        println(message)
+        throwable.printStackTrace()
+      }
+
+    }
     val heapAnalyzer = HeapAnalyzer(OnAnalysisProgressListener.NO_OP)
     val analysis = heapAnalyzer.analyze(
-        hprofFile, AndroidReferenceMatchers.appDefaults, false, AndroidObjectInspectors.appDefaults
+        heapDumpFile = hprofFile,
+        leakingObjectFinder = FilteringLeakingObjectFinder(
+            AndroidObjectInspectors.appLeakingObjectFilters
+        ),
+        referenceMatchers = AndroidReferenceMatchers.appDefaults,
+        computeRetainedHeapSize = false,
+        objectInspectors = AndroidObjectInspectors.appDefaults,
+        metadataExtractor = AndroidMetadataExtractor
     )
     println(analysis)
     return analysis as HeapAnalysisSuccess

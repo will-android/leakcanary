@@ -3,10 +3,16 @@ package leakcanary
 import android.content.Intent
 import leakcanary.LeakCanary.config
 import leakcanary.internal.InternalLeakCanary
+import shark.AndroidMetadataExtractor
 import shark.AndroidObjectInspectors
 import shark.AndroidReferenceMatchers
+import shark.FilteringLeakingObjectFinder
+import shark.HeapAnalysisSuccess
 import shark.IgnoredReferenceMatcher
+import shark.KeyedWeakReferenceFinder
+import shark.LeakingObjectFinder
 import shark.LibraryLeakReferenceMatcher
+import shark.MetadataExtractor
 import shark.ObjectInspector
 import shark.ReferenceMatcher
 import shark.SharkLog
@@ -93,6 +99,14 @@ object LeakCanary {
     val onHeapAnalyzedListener: OnHeapAnalyzedListener = DefaultOnHeapAnalyzedListener.create(),
 
     /**
+     * Extracts metadata from a hprof to be reported in [HeapAnalysisSuccess.metadata].
+     * Called on a background thread during heap analysis.
+     *
+     * Defaults to [AndroidMetadataExtractor]
+     */
+    val metadataExtractor: MetadataExtractor = AndroidMetadataExtractor,
+
+    /**
      * Whether to compute the retained heap size, which is the total number of bytes in memory that
      * would be reclaimed if the detected leaks didn't happen. This includes native memory
      * associated to Java objects (e.g. Android bitmaps).
@@ -126,30 +140,181 @@ object LeakCanary {
     val requestWriteExternalStoragePermission: Boolean = false,
 
     /**
-     * When true, [objectInspectors] are used to find leaks instead of only checking instances
-     * tracked by [KeyedWeakReference]. This leads to finding more leaks and shorter leak traces.
-     * However this also means the same leaking instances will be found in every heap dump for a
-     * given process life.
+     * Finds the objects that are leaking, for which LeakCanary will compute leak traces.
      *
-     * Defaults to false.
+     * Defaults to [KeyedWeakReferenceFinder] which finds all objects tracked by a
+     * [KeyedWeakReference], ie all objects that were passed to [ObjectWatcher.watch].
+     *
+     * You could instead replace it with a [FilteringLeakingObjectFinder], which scans all objects
+     * in the heap dump and delegates the decision to a list of
+     * [FilteringLeakingObjectFinder.LeakingObjectFilter]. This can lead to finding more leaks
+     * than the default and shorter leak traces. This also means that every analysis during a
+     * given process life will bring up the same leaking objects over and over again, unlike
+     * when using [KeyedWeakReferenceFinder] (because [KeyedWeakReference] instances are cleared
+     * after each heap dump).
+     *
+     * The list of filters can be built from [AndroidObjectInspectors]:
+     *
+     * ```
+     * LeakCanary.config = LeakCanary.config.copy(
+     *     leakingObjectFinder = FilteringLeakingObjectFinder(
+     *         AndroidObjectInspectors.appLeakingObjectFilters
+     *     )
+     * )
+     * ```
      */
+    val leakingObjectFinder: LeakingObjectFinder = KeyedWeakReferenceFinder,
+
+    /**
+     * Deprecated: This is a no-op, set a custom [leakingObjectFinder] instead.
+     */
+    @Deprecated("This is a no-op, set a custom leakingObjectFinder instead")
     val useExperimentalLeakFinders: Boolean = false
-  )
+  ) {
+
+    /**
+     * Construct a new Config via [LeakCanary.Config.Builder].
+     * Note: this method is intended to be used from Java code only. For idiomatic Kotlin use
+     * `copy()` to modify [LeakCanary.config].
+     */
+    @Suppress("NEWER_VERSION_IN_SINCE_KOTLIN")
+    @SinceKotlin("999.9") // Hide from Kotlin code, this method is only for Java code
+    fun newBuilder() = Builder(this)
+
+    /**
+     * Builder for [LeakCanary.Config] intended to be used only from Java code.
+     *
+     * Usage:
+     * ```
+     * LeakCanary.Config config = LeakCanary.getConfig().newBuilder()
+     *    .retainedVisibleThreshold(3)
+     *    .build();
+     * LeakCanary.setConfig(config);
+     * ```
+     *
+     * For idiomatic Kotlin use `copy()` method instead:
+     * ```
+     * LeakCanary.config = LeakCanary.config.copy(retainedVisibleThreshold = 3)
+     * ```
+     */
+    @Suppress("TooManyFunctions")
+    class Builder internal constructor(config: Config) {
+      private var dumpHeap = config.dumpHeap
+      private var dumpHeapWhenDebugging = config.dumpHeapWhenDebugging
+      private var retainedVisibleThreshold = config.retainedVisibleThreshold
+      private var referenceMatchers = config.referenceMatchers
+      private var objectInspectors = config.objectInspectors
+      private var onHeapAnalyzedListener = config.onHeapAnalyzedListener
+      private var metadataExtractor = config.metadataExtractor
+      private var computeRetainedHeapSize = config.computeRetainedHeapSize
+      private var maxStoredHeapDumps = config.maxStoredHeapDumps
+      private var requestWriteExternalStoragePermission = config.requestWriteExternalStoragePermission
+      private var leakingObjectFinder = config.leakingObjectFinder
+
+      /** @see [LeakCanary.Config.dumpHeap] */
+      fun dumpHeap(dumpHeap: Boolean) =
+        apply { this.dumpHeap = dumpHeap }
+
+      /** @see [LeakCanary.Config.dumpHeapWhenDebugging] */
+      fun dumpHeapWhenDebugging(dumpHeapWhenDebugging: Boolean) =
+        apply { this.dumpHeapWhenDebugging = dumpHeapWhenDebugging }
+
+      /** @see [LeakCanary.Config.retainedVisibleThreshold] */
+      fun retainedVisibleThreshold(retainedVisibleThreshold: Int) =
+        apply { this.retainedVisibleThreshold = retainedVisibleThreshold }
+
+      /** @see [LeakCanary.Config.referenceMatchers] */
+      fun referenceMatchers(referenceMatchers: List<ReferenceMatcher>) =
+        apply { this.referenceMatchers = referenceMatchers }
+
+      /** @see [LeakCanary.Config.objectInspectors] */
+      fun objectInspectors(objectInspectors: List<ObjectInspector>) =
+        apply { this.objectInspectors = objectInspectors }
+
+      /** @see [LeakCanary.Config.onHeapAnalyzedListener] */
+      fun onHeapAnalyzedListener(onHeapAnalyzedListener: OnHeapAnalyzedListener) =
+        apply { this.onHeapAnalyzedListener = onHeapAnalyzedListener }
+
+      /** @see [LeakCanary.Config.metadataExtractor] */
+      fun metadataExtractor(metadataExtractor: MetadataExtractor) =
+        apply { this.metadataExtractor = metadataExtractor }
+
+      /** @see [LeakCanary.Config.computeRetainedHeapSize] */
+      fun computeRetainedHeapSize(computeRetainedHeapSize: Boolean) =
+        apply { this.computeRetainedHeapSize = computeRetainedHeapSize }
+
+      /** @see [LeakCanary.Config.maxStoredHeapDumps] */
+      fun maxStoredHeapDumps(maxStoredHeapDumps: Int) =
+        apply { this.maxStoredHeapDumps = maxStoredHeapDumps }
+
+      /** @see [LeakCanary.Config.requestWriteExternalStoragePermission] */
+      fun requestWriteExternalStoragePermission(requestWriteExternalStoragePermission: Boolean) =
+        apply { this.requestWriteExternalStoragePermission = requestWriteExternalStoragePermission }
+
+      /** @see [LeakCanary.Config.leakingObjectFinder] */
+      fun leakingObjectFinder(leakingObjectFinder: LeakingObjectFinder) =
+        apply { this.leakingObjectFinder = leakingObjectFinder }
+
+      fun build() = config.copy(
+          dumpHeap = dumpHeap,
+          dumpHeapWhenDebugging = dumpHeapWhenDebugging,
+          retainedVisibleThreshold = retainedVisibleThreshold,
+          referenceMatchers = referenceMatchers,
+          objectInspectors = objectInspectors,
+          onHeapAnalyzedListener = onHeapAnalyzedListener,
+          metadataExtractor = metadataExtractor,
+          computeRetainedHeapSize = computeRetainedHeapSize,
+          maxStoredHeapDumps = maxStoredHeapDumps,
+          requestWriteExternalStoragePermission = requestWriteExternalStoragePermission,
+          leakingObjectFinder = leakingObjectFinder
+      )
+    }
+  }
 
   /**
    * The current LeakCanary configuration. Can be updated at any time, usually by replacing it with
    * a mutated copy, e.g.:
    *
    * ```
-   * LeakCanary.config = LeakCanary.config.copy(computeRetainedHeapSize = true)
+   * LeakCanary.config = LeakCanary.config.copy(retainedVisibleThreshold = 3)
+   * ```
+   *
+   * In Java, you can use [LeakCanary.Config.Builder] instead:
+   * ```
+   * LeakCanary.Config config = LeakCanary.getConfig().newBuilder()
+   *    .retainedVisibleThreshold(3)
+   *    .build();
+   * LeakCanary.setConfig(config);
    * ```
    */
-  @Volatile
+  @JvmStatic @Volatile
   var config: Config = if (AppWatcher.isInstalled) Config() else InternalLeakCanary.noInstallConfig
-    set(value) {
-      field = value
-      SharkLog.d { "Updated LeakCanary.config to $value" }
+    set(newConfig) {
+      val previousConfig = field
+      field = newConfig
+      logConfigChange(previousConfig, newConfig)
     }
+
+  private fun logConfigChange(
+    previousConfig: Config,
+    newConfig: Config
+  ) {
+    SharkLog.d {
+      val changedFields = mutableListOf<String>()
+      Config::class.java.declaredFields.forEach { field ->
+        field.isAccessible = true
+        val previousValue = field[previousConfig]
+        val newValue = field[newConfig]
+        if (previousValue != newValue) {
+          changedFields += "${field.name}=$newValue"
+        }
+      }
+      val changesInConfig =
+        if (changedFields.isNotEmpty()) changedFields.joinToString(", ") else "no changes"
+
+      "Updated LeakCanary.config: Config($changesInConfig)"
+    }
+  }
 
   /**
    * Returns a new [Intent] that can be used to programmatically launch the leak display activity.
@@ -179,5 +344,5 @@ object LeakCanary {
    * tracked by [AppWatcher.objectWatcher]. If there are no retained instances then the heap will not
    * be dumped and a notification will be shown instead.
    */
-  fun dumpHeap() = InternalLeakCanary.onDumpHeapReceived()
+  fun dumpHeap() = InternalLeakCanary.onDumpHeapReceived(forceDump = true)
 }

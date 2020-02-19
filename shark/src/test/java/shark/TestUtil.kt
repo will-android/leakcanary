@@ -1,5 +1,6 @@
 package shark
 
+import shark.FilteringLeakingObjectFinder.LeakingObjectFilter
 import shark.ReferencePattern.InstanceFieldPattern
 import shark.ReferencePattern.JavaLocalPattern
 import java.io.File
@@ -12,7 +13,9 @@ fun <T : HeapAnalysis> File.checkForLeaks(
   objectInspectors: List<ObjectInspector> = emptyList(),
   computeRetainedHeapSize: Boolean = false,
   referenceMatchers: List<ReferenceMatcher> = defaultReferenceMatchers,
-  proguardMapping: ProguardMapping? = null
+  metadataExtractor: MetadataExtractor = MetadataExtractor.NO_OP,
+  proguardMapping: ProguardMapping? = null,
+  leakFilters: List<LeakingObjectFilter> = ObjectInspectors.jdkLeakingObjectFilters
 ): T {
   val inspectors = if (ObjectInspectors.KEYED_WEAK_REFERENCE !in objectInspectors) {
     objectInspectors + ObjectInspectors.KEYED_WEAK_REFERENCE
@@ -21,10 +24,12 @@ fun <T : HeapAnalysis> File.checkForLeaks(
   }
   val heapAnalyzer = HeapAnalyzer(OnAnalysisProgressListener.NO_OP)
   val result = heapAnalyzer.analyze(
-      this,
-      referenceMatchers,
-      computeRetainedHeapSize,
-      inspectors,
+      heapDumpFile = this,
+      leakingObjectFinder = FilteringLeakingObjectFinder(leakFilters),
+      referenceMatchers = referenceMatchers,
+      computeRetainedHeapSize = computeRetainedHeapSize,
+      objectInspectors = inspectors,
+      metadataExtractor = metadataExtractor,
       proguardMapping = proguardMapping
   )
   if (result is HeapAnalysisFailure) {

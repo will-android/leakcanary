@@ -6,11 +6,14 @@ import android.content.Intent
 import android.net.Uri
 import android.os.AsyncTask
 import android.os.Bundle
+import android.view.View
 import com.squareup.leakcanary.core.R
 import leakcanary.internal.HeapAnalyzerService
 import leakcanary.internal.InternalLeakCanary
 import leakcanary.internal.activity.db.Db
-import leakcanary.internal.activity.screen.GroupListScreen
+import leakcanary.internal.activity.screen.AboutScreen
+import leakcanary.internal.activity.screen.HeapDumpsScreen
+import leakcanary.internal.activity.screen.LeaksScreen
 import leakcanary.internal.navigation.NavigatingActivity
 import leakcanary.internal.navigation.Screen
 import shark.SharkLog
@@ -19,15 +22,82 @@ import java.io.IOException
 
 internal class LeakActivity : NavigatingActivity() {
 
+  private val leaksButton by lazy {
+    findViewById<View>(R.id.leak_canary_navigation_button_leaks)
+  }
+
+  private val leaksButtonIconView by lazy {
+    findViewById<View>(R.id.leak_canary_navigation_button_leaks_icon)
+  }
+
+  private val heapDumpsButton by lazy {
+    findViewById<View>(R.id.leak_canary_navigation_button_heap_dumps)
+  }
+
+  private val heapDumpsButtonIconView by lazy {
+    findViewById<View>(R.id.leak_canary_navigation_button_heap_dumps_icon)
+  }
+
+  private val aboutButton by lazy {
+    findViewById<View>(R.id.leak_canary_navigation_button_about)
+  }
+
+  private val aboutButtonIconView by lazy {
+    findViewById<View>(R.id.leak_canary_navigation_button_about_icon)
+  }
+
+  private val bottomNavigationBar by lazy {
+    findViewById<View>(R.id.leak_canary_bottom_navigation_bar)
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.leak_canary_leak_activity)
 
-    installNavigation(savedInstanceState, findViewById(R.id.main_container))
+    installNavigation(savedInstanceState, findViewById(R.id.leak_canary_main_container))
+
+    leaksButton.setOnClickListener { resetTo(LeaksScreen()) }
+    heapDumpsButton.setOnClickListener { resetTo(HeapDumpsScreen()) }
+    aboutButton.setOnClickListener { resetTo(AboutScreen()) }
+  }
+
+  override fun onNewScreen(screen: Screen) {
+    when (screen) {
+      is LeaksScreen -> {
+        bottomNavigationBar.visibility = View.VISIBLE
+        leaksButton.isSelected = true
+        leaksButtonIconView.alpha = 1.0f
+        heapDumpsButton.isSelected = false
+        heapDumpsButtonIconView.alpha = 0.4f
+        aboutButton.isSelected = false
+        aboutButtonIconView.alpha = 0.4f
+      }
+      is HeapDumpsScreen -> {
+        bottomNavigationBar.visibility = View.VISIBLE
+        leaksButton.isSelected = false
+        leaksButtonIconView.alpha = 0.4f
+        heapDumpsButton.isSelected = true
+        heapDumpsButtonIconView.alpha = 1.0f
+        aboutButton.isSelected = false
+        aboutButtonIconView.alpha = 0.4f
+      }
+      is AboutScreen -> {
+        bottomNavigationBar.visibility = View.VISIBLE
+        leaksButton.isSelected = false
+        leaksButtonIconView.alpha = 0.4f
+        heapDumpsButton.isSelected = false
+        heapDumpsButtonIconView.alpha = 0.4f
+        aboutButton.isSelected = true
+        aboutButtonIconView.alpha = 1.0f
+      }
+      else -> {
+        bottomNavigationBar.visibility = View.GONE
+      }
+    }
   }
 
   override fun getLauncherScreen(): Screen {
-    return GroupListScreen()
+    return LeaksScreen()
   }
 
   fun requestImportHprof() {
@@ -48,7 +118,7 @@ internal class LeakActivity : NavigatingActivity() {
     returnIntent: Intent?
   ) {
     SharkLog.d {
-        "Got activity result with requestCode=$requestCode resultCode=$resultCode returnIntent=$returnIntent"
+      "Got activity result with requestCode=$requestCode resultCode=$resultCode returnIntent=$returnIntent"
     }
     if (requestCode == FILE_REQUEST_CODE && resultCode == RESULT_OK && returnIntent != null) {
       returnIntent.data?.let { fileUri ->

@@ -3,7 +3,7 @@
 This page contains code recipes to customize LeakCanary to your needs. Read through the section titles and cook your own meal! Also don't forget to check out the [FAQ](faq.md).
 
 !!! bug
-    If you think a recipe might be missing or you're not sure that what you're trying to achieve is possible with the current APIs, please [file an issue](https://github.com/square/leakcanary/issues/new/choose). Your feedback help us make LeakCanary better for the entire community.
+    If you think a recipe might be missing or you're not sure that what you're trying to achieve is possible with the current APIs, please [file an issue](https://github.com/square/leakcanary/issues/new/choose). Your feedback helps us make LeakCanary better for the entire community.
 
 ## Watching objects with a lifecycle
 
@@ -18,7 +18,10 @@ class MyService : Service {
 
   override fun onDestroy() {
     super.onDestroy()
-    AppWatcher.objectWatcher.watch(this, "MyService received Service#onDestroy() callback")
+    AppWatcher.objectWatcher.watch(
+      watchedObject = this,
+      description = "MyService received Service#onDestroy() callback"
+    )
   }
 }
 ```
@@ -42,31 +45,32 @@ class DebugExampleApplication : ExampleApplication() {
 
 To customize the detection of retained objects at runtime, update [AppWatcher.config](/leakcanary/api/leakcanary-object-watcher-android/leakcanary/-app-watcher/config/):
 
-```
+```kotlin
 AppWatcher.config = AppWatcher.config.copy(watchFragmentViews = false)
-```
-
-In Java, use [AppWatcher.Config.Builder](/leakcanary/api/leakcanary-object-watcher-android/leakcanary/-app-watcher/-config/-builder/) instead:
-```
-AppWatcher.Config config = AppWatcher.getConfig().newBuilder()
-   .watchFragmentViews(false)
-   .build();
-AppWatcher.setConfig(config);
 ```
 
 To customize the heap dumping & analysis, update [LeakCanary.config](/leakcanary/api/leakcanary-android-core/leakcanary/-leak-canary/config/):
 
-```
+```kotlin
 LeakCanary.config = LeakCanary.config.copy(retainedVisibleThreshold = 3)
 ```
 
-In Java, use [LeakCanary.Config.Builder](/leakcanary/api/leakcanary-android-core/leakcanary/-leak-canary/-config/-builder/) instead:
-```
-LeakCanary.Config config = LeakCanary.getConfig().newBuilder()
-   .retainedVisibleThreshold(3)
-   .build();
-LeakCanary.setConfig(config);
-```
+!!! info "Java"
+    In Java, use [AppWatcher.Config.Builder](/leakcanary/api/leakcanary-object-watcher-android/leakcanary/-app-watcher/-config/-builder/) and [LeakCanary.Config.Builder](/leakcanary/api/leakcanary-android-core/leakcanary/-leak-canary/-config/-builder/) instead:
+    
+    ```java
+    AppWatcher.Config config = AppWatcher.getConfig().newBuilder()
+       .watchFragmentViews(false)
+       .build();
+    AppWatcher.setConfig(config);
+    ```
+    
+    ```java
+    LeakCanary.Config config = LeakCanary.getConfig().newBuilder()
+       .retainedVisibleThreshold(3)
+       .build();
+    LeakCanary.setConfig(config);
+    ```
 
 Configure the LeakCanary UI by overriding the following resources:
 
@@ -81,14 +85,11 @@ Configure the LeakCanary UI by overriding the following resources:
 Sometimes it's necessary to disable LeakCanary temporarily, for example for a product demo or when running performance tests. You have different options, depending on what you're trying to achieve:
 
 * Create a build variant that does not include the LeakCanary dependencies, see [Setting up LeakCanary for different product flavors](#setting-up-leakcanary-for-different-product-flavors).
-* Disable the tracking of retained objects: `AppWatcher.config = AppWatcher.config.copy(enabled = false)`.
 * Disable the heap dumping & analysis: `LeakCanary.config = LeakCanary.config.copy(dumpHeap = false)`.
 * Hide the leak display activity launcher icon: override `R.bool.leak_canary_add_launcher_icon` or call `LeakCanary.showLeakDisplayActivityLauncherIcon(false)`
 
 !!! info
-    When you set `AppWatcher.config.enabled` to false, `AppWatcher.objectWatcher` will stop creating weak references to destroyed objects.
-
-	If instead you set `LeakCanary.Config.dumpHeap` to false, `AppWatcher.objectWatcher` will still keep track of retained objects, and LeakCanary will look for these objects when you change `LeakCanary.Config.dumpHeap` back to true.
+    When you set `LeakCanary.Config.dumpHeap` to `false`, `AppWatcher.objectWatcher` will still keep track of retained objects, and LeakCanary will look for these objects when you change `LeakCanary.Config.dumpHeap` back to `true`.
 
 ## Counting retained instances in release builds
 
@@ -98,7 +99,7 @@ In your `build.gradle`:
 
 ```gradle
 dependencies {
-  implementation 'com.squareup.leakcanary:leakcanary-object-watcher-android:2.0-beta-5'
+  implementation 'com.squareup.leakcanary:leakcanary-object-watcher-android:{{ leak_canary.release }}'
 }
 ```
 
@@ -543,7 +544,6 @@ And then you need to apply and configure the plugin in your app (or library) spe
 
 ```groovy
 apply plugin: 'com.android.application'
-// LeakCanary plugin should be added after android application or android library plugin
 apply plugin: 'com.squareup.leakcanary.deobfuscation'
 
 leakCanary {
@@ -666,7 +666,13 @@ objectWatcher.watch(
 )
 ```
 
-If you end up using LeakCanary on a JVM, the community will definitely benefit from you experience, so don't hesitate to [let us know](https://github.com/square/leakcanary/issues/)!
+If you end up using LeakCanary on a JVM, the community will definitely benefit from your experience, so don't hesitate to [let us know](https://github.com/square/leakcanary/issues/)!
 
+## PackageManager.getLaunchIntentForPackage() returns LeakLauncherActivity
+
+LeakCanary adds a main activity that has a [Intent#CATEGORY_LAUNCHER](https://developer.android.com/reference/android/content/Intent#CATEGORY_LAUNCHER) category. <a href="https://developer.android.com/reference/android/content/pm/PackageManager#getLaunchIntentForPackage(java.lang.String)">PackageManager.getLaunchIntentForPackage()</a> looks for a main activity in the category `Intent#CATEGORY_INFO`, and next for a main activity in the category `Intent#CATEGORY_LAUNCHER`. `PackageManager.getLaunchIntentForPackage()` returns the first activity that matches in the merged manifest of your app. If your app relies on `PackageManager.getLaunchIntentForPackage()`, you have two options:
+
+* Add `Intent#CATEGORY_INFO` to your main activity intent filter, so that it gets picked up first. This is what the Android documentation recommends.
+* Disable the leakcanary launcher activity by setting the `leak_canary_add_launcher_icon` resource boolean to false.
 
 

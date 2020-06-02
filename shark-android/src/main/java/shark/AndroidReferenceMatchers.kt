@@ -60,7 +60,11 @@ enum class AndroidReferenceMatchers {
                   "anonymous subclass. That anonymous subclass has a reference to the activity. " +
                   "Another process is keeping the android.app.IRequestFinishCallback\$Stub " +
                   "reference alive long after Activity.onDestroyed() has been called, " +
-                  "causing the activity to leak."
+                  "causing the activity to leak." +
+                  "Fix: You can \"fix\" this leak by overriding Activity.onBackPressed() and calling " +
+                  "Activity.finishAfterTransition(); instead of super if the activity is task root and the " +
+                  "fragment stack is empty." +
+                  "Tracked here: https://issuetracker.google.com/issues/139738913"
           ) {
               sdkInt == 29
           }
@@ -540,7 +544,7 @@ enum class AndroidReferenceMatchers {
               " on the screen. TextView.ChangeWatcher and android.widget.Editor end up in spans and" +
               " typically hold on to the view hierarchy"
       ) {
-        sdkInt in 24..28
+        sdkInt in 24..29
       }
     }
   },
